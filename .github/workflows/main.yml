@@ -1,0 +1,36 @@
+name: ScwOrder-WhatsApp-Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+# When a new run starts, cancel the old one — but the old job saves session first via SIGTERM handler
+concurrency:
+  group: scworder-bot
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Start Bot
+        env:
+          FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
+          PHONE_NUMBER: ${{ secrets.PHONE_NUMBER }}
+          NODE_NO_WARNINGS: 1
+          MAX_RUNTIME_MINUTES: '340'
+        run: node --no-warnings index.js
