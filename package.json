@@ -1,0 +1,14 @@
+{
+  "name": "ScwOrder-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot linked to ScwOrder App",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "baileys": "latest",
+    "pino": "^8.19.0",
+    "qrcode": "^1.5.4"
+  }
+}
