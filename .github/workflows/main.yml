@@ -31,6 +31,9 @@ jobs:
         env:
           FIREBASE_URL: ${{ secrets.FIREBASE_URL }}
           PHONE_NUMBER: ${{ secrets.PHONE_NUMBER }}
+          ADMIN_EMAIL:  ${{ secrets.ADMIN_EMAIL }}
+          SMTP_USER:    ${{ secrets.SMTP_USER }}
+          SMTP_PASS:    ${{ secrets.SMTP_PASS }}
           NODE_NO_WARNINGS: 1
           MAX_RUNTIME_MINUTES: '340'
         run: node --no-warnings index.js
