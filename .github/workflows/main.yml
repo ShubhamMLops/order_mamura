@@ -36,6 +36,7 @@ jobs:
           SMTP_PASS:    ${{ secrets.SMTP_PASS }}
           SMTP_HOST:    ${{ secrets.SMTP_HOST }}
           SMTP_PORT:    ${{ secrets.SMTP_PORT }}
+          STORE_NAME:   ${{ secrets.STORE_NAME }}
           NODE_NO_WARNINGS: 1
           MAX_RUNTIME_MINUTES: '340'
         run: node --no-warnings index.js
