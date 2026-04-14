@@ -413,8 +413,7 @@ async function sendOrderEmail(order, cartItems) {
         console.log('[Email] Sent successfully to:', ADMIN_EMAIL);
     } catch(e) {
         console.log('[Email] Failed:', e.message);
-    }
-}
+    }}
 
 function smtpSend(to, subject, body) {
     return new Promise((resolve, reject) => {
@@ -444,7 +443,10 @@ function smtpSend(to, subject, body) {
                             cmd(Buffer.from(SMTP_PASS).toString('base64'));
                             read((res) => {
                                 console.log('[SMTP] Auth response:', res.trim().substring(0,30));
-                                if (!res.includes('235')) { socket.destroy(); return reject(new Error('Auth failed: ' + res.trim().substring(0,50))); }
+                                if (!res.includes('235')) {
+                                    socket.destroy();
+                                    return reject(new Error('Auth failed: ' + res.trim().substring(0,80)));
+                                }
                                 cmd(`MAIL FROM: <${SMTP_USER}>`);
                                 read(() => {
                                     cmd(`RCPT TO: <${to}>`);
