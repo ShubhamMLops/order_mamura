@@ -13,6 +13,7 @@ const SMTP_USER     = process.env.SMTP_USER;
 const SMTP_PASS     = process.env.SMTP_PASS;
 const SMTP_HOST     = process.env.SMTP_HOST || 'smtp.gmail.com';
 const SMTP_PORT     = parseInt(process.env.SMTP_PORT || '465');
+const STORE_NAME    = process.env.STORE_NAME || 'Mamura';
 const DELIVERY_FEE  = 50;
 const GST_RATE      = 0.05;
 const FREE_DELIVERY = 375;
@@ -99,6 +100,14 @@ async function getMenu() {
             .map(k => ({ id: k, ...data[k], portions: data[k].portions || null }))
             .filter(d => !d.outOfStock);
     } catch (e) { console.error('[Menu] Fetch error:', e); return []; }
+}
+
+async function getMenuImageUrl() {
+    try {
+        const res  = await fetch(`${FIREBASE_URL}/settings/menuImageUrl.json`);
+        const url  = await res.json();
+        return (url && typeof url === 'string' && url.startsWith('http')) ? url : null;
+    } catch { return null; }
 }
 
 // ── Menu text — numbered list ─────────────────────────────────────────────────
@@ -383,24 +392,19 @@ async function getStoreClosedMessage() {
 
 // ── Send order email notification ─────────────────────────────────────────────
 async function sendOrderEmail(order, cartItems) {
-    if (!ADMIN_EMAIL || !SMTP_USER || !SMTP_PASS) {
-        console.log('[Email] Skipped — missing credentials');
-        return;
-    }
-    console.log('[Email] Sending order notification to:', ADMIN_EMAIL);
+    if (!ADMIN_EMAIL || !SMTP_USER || !SMTP_PASS) return;
     try {
         const itemLines = cartItems.map(e => {
             const name  = e.portion ? `${e.item.name} (${e.portion.name})` : e.item.name;
             const price = e.portion ? e.portion.price : (e.item.price || 0);
             return `  • ${name} — Rs.${price}`;
         }).join('\n');
-
         const subtotal = cartItems.reduce((s, e) =>
             s + parseFloat(e.portion ? e.portion.price : (e.item.price || 0)), 0);
-
-        const subject = `New Order — Rs.${subtotal.toFixed(0)} — ${order.phone}`;
-        const body    =
-            `New WhatsApp Order Received!\n\n` +
+        const subject = `[${STORE_NAME}] New Order — Rs.${subtotal.toFixed(0)} — ${order.phone}`;
+        const body =
+            `${STORE_NAME} — New WhatsApp Order Received!\n` +
+            `${'='.repeat(40)}\n\n` +
             `Time    : ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n` +
             `Phone   : ${order.phone}\n` +
             `Address : ${order.address}\n\n` +
@@ -408,19 +412,14 @@ async function sendOrderEmail(order, cartItems) {
             `Subtotal: Rs.${subtotal.toFixed(0)}\n` +
             `Note    : +5% GST applicable\n\n` +
             `Open admin panel to accept the order.`;
-
         await smtpSend(ADMIN_EMAIL, subject, body);
-        console.log('[Email] Sent successfully to:', ADMIN_EMAIL);
-    } catch(e) {
-        console.log('[Email] Failed:', e.message);
-    }}
+    } catch(e) { /* silent */ }
+}
 
 function smtpSend(to, subject, body) {
     return new Promise((resolve, reject) => {
         const tls = require('tls');
-        console.log('[SMTP] Connecting to ' + SMTP_HOST + ':' + SMTP_PORT + '...');
         const socket = tls.connect(SMTP_PORT, SMTP_HOST, { rejectUnauthorized: false }, () => {
-            console.log('[SMTP] Connected');
             let buf = '';
             const read = (cb) => {
                 const handler = (d) => {
@@ -430,10 +429,8 @@ function smtpSend(to, subject, body) {
                 };
                 socket.once('data', handler);
             };
-            const cmd = (c) => { console.log('[SMTP] >', c.substring(0,20)); socket.write(c + '\r\n'); };
-
-            read((r) => {
-                console.log('[SMTP] Greeting:', r.trim().substring(0,40));
+            const cmd = (c) => socket.write(c + '\r\n');
+            read(() => {
                 cmd(`EHLO ${SMTP_HOST}`);
                 read(() => {
                     cmd(`AUTH LOGIN`);
@@ -442,29 +439,18 @@ function smtpSend(to, subject, body) {
                         read(() => {
                             cmd(Buffer.from(SMTP_PASS).toString('base64'));
                             read((res) => {
-                                console.log('[SMTP] Auth response:', res.trim().substring(0,30));
-                                if (!res.includes('235')) {
-                                    socket.destroy();
-                                    return reject(new Error('Auth failed: ' + res.trim().substring(0,80)));
-                                }
+                                if (!res.includes('235')) { socket.destroy(); return reject(new Error('Auth failed')); }
                                 cmd(`MAIL FROM: <${SMTP_USER}>`);
                                 read(() => {
                                     cmd(`RCPT TO: <${to}>`);
-                                    read((rcptRes) => {
-                                        console.log('[SMTP] RCPT response:', rcptRes.trim().substring(0,30));
+                                    read(() => {
                                         cmd('DATA');
                                         read(() => {
                                             socket.write(
-                                                `From: ScwOrder <${SMTP_USER}>\r\n` +
-                                                `To: <${to}>\r\n` +
-                                                `Subject: ${subject}\r\n` +
-                                                `MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n` +
-                                                `${body}\r\n.\r\n`
+                                                `From: ${STORE_NAME} <${SMTP_USER}>\r\nTo: <${to}>\r\nSubject: ${subject}\r\n` +
+                                                `MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${body}\r\n.\r\n`
                                             );
-                                            read((sendRes) => {
-                                                console.log('[SMTP] Send response:', sendRes.trim().substring(0,30));
-                                                cmd('QUIT'); socket.destroy(); resolve();
-                                            });
+                                            read(() => { cmd('QUIT'); socket.destroy(); resolve(); });
                                         });
                                     });
                                 });
@@ -474,7 +460,7 @@ function smtpSend(to, subject, body) {
                 });
             });
         });
-        socket.on('error', (e) => { console.log('[SMTP] Socket error:', e.message); reject(e); });
+        socket.on('error', reject);
     });
 }
 
@@ -640,8 +626,15 @@ async function startBot() {
         if (/^(menu|price|prices|list|items)$/.test(text)) {
             const menu = await getMenu();
             const { text: menuText, indexMap } = buildMenuText(menu);
-            // Store indexMap in session so user can order by number
             sessions[sender] = { ...(sessions[sender] || {}), indexMap };
+            // Send menu image first if admin has uploaded one
+            const menuImgUrl = await getMenuImageUrl();
+            if (menuImgUrl) {
+                await sock.sendMessage(sender, {
+                    image: { url: menuImgUrl },
+                    caption: '🍽️ *ScwOrder Menu*\n\nSee full menu with prices below 👇'
+                });
+            }
             return send(menuText);
         }
         if (/^(cart|my cart|bag|view cart|show cart|mycart)$/.test(text)) {
