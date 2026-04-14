@@ -8,6 +8,9 @@ const fs     = require('fs');
 const path   = require('path');
 
 const FIREBASE_URL  = process.env.FIREBASE_URL;
+const ADMIN_EMAIL   = process.env.ADMIN_EMAIL;   // set in GitHub Secrets
+const SMTP_USER     = process.env.SMTP_USER;     // Gmail address
+const SMTP_PASS     = process.env.SMTP_PASS;     // Gmail app password
 const DELIVERY_FEE  = 50;
 const GST_RATE      = 0.05;
 const FREE_DELIVERY = 375;
@@ -374,6 +377,87 @@ async function getStoreClosedMessage() {
     } catch(e) {
         return `🔒 *Our outlet is currently closed.* Please check back later!`;
     }
+}
+
+// ── Send order email notification ─────────────────────────────────────────────
+async function sendOrderEmail(order, cartItems) {
+    if (!ADMIN_EMAIL || !SMTP_USER || !SMTP_PASS) return;
+    try {
+        const itemLines = cartItems.map(e => {
+            const name  = e.portion ? `${e.item.name} (${e.portion.name})` : e.item.name;
+            const price = e.portion ? e.portion.price : (e.item.price || 0);
+            return `  • ${name} — Rs.${price}`;
+        }).join('\n');
+
+        const subtotal = cartItems.reduce((s, e) =>
+            s + parseFloat(e.portion ? e.portion.price : (e.item.price || 0)), 0);
+
+        const subject = `New Order — Rs.${subtotal.toFixed(0)} — ${order.phone}`;
+        const body    =
+            `New WhatsApp Order Received!\n\n` +
+            `Time    : ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}\n` +
+            `Phone   : ${order.phone}\n` +
+            `Address : ${order.address}\n\n` +
+            `Items:\n${itemLines}\n\n` +
+            `Subtotal: Rs.${subtotal.toFixed(0)}\n` +
+            `Note    : +5% GST applicable\n\n` +
+            `Open admin panel to accept the order.`;
+
+        await smtpSend(ADMIN_EMAIL, subject, body);
+    } catch(e) {}
+}
+
+function smtpSend(to, subject, body) {
+    return new Promise((resolve, reject) => {
+        const tls = require('tls');
+        const socket = tls.connect(465, 'smtp.gmail.com', { rejectUnauthorized: false }, () => {
+            const chunks = [];
+            let buf = '';
+            const read = (cb) => {
+                const handler = (d) => {
+                    buf += d.toString();
+                    if (buf.includes('\r\n')) { const line = buf; buf = ''; socket.removeListener('data', handler); cb(line); }
+                    else socket.once('data', handler);
+                };
+                socket.once('data', handler);
+            };
+            const cmd = (c) => socket.write(c + '\r\n');
+
+            read(() => {
+                cmd(`EHLO smtp.gmail.com`);
+                read(() => {
+                    cmd(`AUTH LOGIN`);
+                    read(() => {
+                        cmd(Buffer.from(SMTP_USER).toString('base64'));
+                        read(() => {
+                            cmd(Buffer.from(SMTP_PASS).toString('base64'));
+                            read((res) => {
+                                if (!res.includes('235')) { socket.destroy(); return reject(new Error('Auth failed')); }
+                                cmd(`MAIL FROM: <${SMTP_USER}>`);
+                                read(() => {
+                                    cmd(`RCPT TO: <${to}>`);
+                                    read(() => {
+                                        cmd('DATA');
+                                        read(() => {
+                                            socket.write(
+                                                `From: ScwOrder <${SMTP_USER}>\r\n` +
+                                                `To: <${to}>\r\n` +
+                                                `Subject: ${subject}\r\n` +
+                                                `MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n` +
+                                                `${body}\r\n.\r\n`
+                                            );
+                                            read(() => { cmd('QUIT'); socket.destroy(); resolve(); });
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+        socket.on('error', reject);
+    });
 }
 
 async function startBot() {
@@ -766,6 +850,9 @@ async function startBot() {
                         timestamp: new Date().toISOString()
                     })
                 }).catch(() => console.log('[Order] Firebase error — order may not have saved'));
+
+                // Send email notification to admin
+                sendOrderEmail({ phone: phoneMatch[1], address: rawText }, cart);
 
                 delete sessions[sender];
                 return send(
