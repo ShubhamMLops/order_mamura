@@ -8,9 +8,11 @@ const fs     = require('fs');
 const path   = require('path');
 
 const FIREBASE_URL  = process.env.FIREBASE_URL;
-const ADMIN_EMAIL   = process.env.ADMIN_EMAIL;   // set in GitHub Secrets
-const SMTP_USER     = process.env.SMTP_USER;     // Gmail address
-const SMTP_PASS     = process.env.SMTP_PASS;     // Gmail app password
+const ADMIN_EMAIL   = process.env.ADMIN_EMAIL;
+const SMTP_USER     = process.env.SMTP_USER;
+const SMTP_PASS     = process.env.SMTP_PASS;
+const SMTP_HOST     = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT     = parseInt(process.env.SMTP_PORT || '465');
 const DELIVERY_FEE  = 50;
 const GST_RATE      = 0.05;
 const FREE_DELIVERY = 375;
@@ -381,7 +383,11 @@ async function getStoreClosedMessage() {
 
 // ── Send order email notification ─────────────────────────────────────────────
 async function sendOrderEmail(order, cartItems) {
-    if (!ADMIN_EMAIL || !SMTP_USER || !SMTP_PASS) return;
+    if (!ADMIN_EMAIL || !SMTP_USER || !SMTP_PASS) {
+        console.log('[Email] Skipped — missing credentials');
+        return;
+    }
+    console.log('[Email] Sending order notification to:', ADMIN_EMAIL);
     try {
         const itemLines = cartItems.map(e => {
             const name  = e.portion ? `${e.item.name} (${e.portion.name})` : e.item.name;
@@ -404,14 +410,18 @@ async function sendOrderEmail(order, cartItems) {
             `Open admin panel to accept the order.`;
 
         await smtpSend(ADMIN_EMAIL, subject, body);
-    } catch(e) {}
+        console.log('[Email] Sent successfully to:', ADMIN_EMAIL);
+    } catch(e) {
+        console.log('[Email] Failed:', e.message);
+    }
 }
 
 function smtpSend(to, subject, body) {
     return new Promise((resolve, reject) => {
         const tls = require('tls');
-        const socket = tls.connect(465, 'smtp.gmail.com', { rejectUnauthorized: false }, () => {
-            const chunks = [];
+        console.log('[SMTP] Connecting to ' + SMTP_HOST + ':' + SMTP_PORT + '...');
+        const socket = tls.connect(SMTP_PORT, SMTP_HOST, { rejectUnauthorized: false }, () => {
+            console.log('[SMTP] Connected');
             let buf = '';
             const read = (cb) => {
                 const handler = (d) => {
@@ -421,10 +431,11 @@ function smtpSend(to, subject, body) {
                 };
                 socket.once('data', handler);
             };
-            const cmd = (c) => socket.write(c + '\r\n');
+            const cmd = (c) => { console.log('[SMTP] >', c.substring(0,20)); socket.write(c + '\r\n'); };
 
-            read(() => {
-                cmd(`EHLO smtp.gmail.com`);
+            read((r) => {
+                console.log('[SMTP] Greeting:', r.trim().substring(0,40));
+                cmd(`EHLO ${SMTP_HOST}`);
                 read(() => {
                     cmd(`AUTH LOGIN`);
                     read(() => {
@@ -432,11 +443,13 @@ function smtpSend(to, subject, body) {
                         read(() => {
                             cmd(Buffer.from(SMTP_PASS).toString('base64'));
                             read((res) => {
-                                if (!res.includes('235')) { socket.destroy(); return reject(new Error('Auth failed')); }
+                                console.log('[SMTP] Auth response:', res.trim().substring(0,30));
+                                if (!res.includes('235')) { socket.destroy(); return reject(new Error('Auth failed: ' + res.trim().substring(0,50))); }
                                 cmd(`MAIL FROM: <${SMTP_USER}>`);
                                 read(() => {
                                     cmd(`RCPT TO: <${to}>`);
-                                    read(() => {
+                                    read((rcptRes) => {
+                                        console.log('[SMTP] RCPT response:', rcptRes.trim().substring(0,30));
                                         cmd('DATA');
                                         read(() => {
                                             socket.write(
@@ -446,7 +459,10 @@ function smtpSend(to, subject, body) {
                                                 `MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n` +
                                                 `${body}\r\n.\r\n`
                                             );
-                                            read(() => { cmd('QUIT'); socket.destroy(); resolve(); });
+                                            read((sendRes) => {
+                                                console.log('[SMTP] Send response:', sendRes.trim().substring(0,30));
+                                                cmd('QUIT'); socket.destroy(); resolve();
+                                            });
                                         });
                                     });
                                 });
@@ -456,7 +472,7 @@ function smtpSend(to, subject, body) {
                 });
             });
         });
-        socket.on('error', reject);
+        socket.on('error', (e) => { console.log('[SMTP] Socket error:', e.message); reject(e); });
     });
 }
 
