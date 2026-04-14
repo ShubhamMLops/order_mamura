@@ -34,6 +34,8 @@ jobs:
           ADMIN_EMAIL:  ${{ secrets.ADMIN_EMAIL }}
           SMTP_USER:    ${{ secrets.SMTP_USER }}
           SMTP_PASS:    ${{ secrets.SMTP_PASS }}
+          SMTP_HOST:    ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:    ${{ secrets.SMTP_PORT }}
           NODE_NO_WARNINGS: 1
           MAX_RUNTIME_MINUTES: '340'
         run: node --no-warnings index.js
